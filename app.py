@@ -10,6 +10,9 @@ UP_COLOR = "#e03131"
 DOWN_COLOR = "#1971c2"
 FLAT_COLOR = "#868e96"
 
+CURRENCY_LABELS = {"KRW": "원", "USD": "달러", "JPY": "엔"}
+CURRENCY_SUFFIX = {"KRW": "원", "USD": "$", "JPY": "¥"}
+
 CUSTOM_CSS = """
 <style>
 .block-container { padding-top: 2rem; max-width: 1200px; }
@@ -28,6 +31,26 @@ CUSTOM_CSS = """
 .stock-eval b { font-weight: 700; }
 .portfolio-total-label { font-size: 0.85rem; color: #868e96; }
 .portfolio-total-value { font-size: 1.4rem; font-weight: 800; }
+
+/* 스마트폰에서도 한 줄에 3개씩 유지 */
+@media (max-width: 640px) {
+    .st-key-stock_grid div[data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important;
+        gap: 0.4rem !important;
+    }
+    .st-key-stock_grid div[data-testid="column"] {
+        width: 33.33% !important;
+        min-width: 33.33% !important;
+        flex: 1 1 0 !important;
+    }
+    .stock-name { font-size: 0.8rem; }
+    .stock-ticker { font-size: 0.62rem; }
+    .stock-price { font-size: 0.95rem; margin-top: 6px; }
+    .stock-currency { font-size: 0.65rem; }
+    .stock-change { font-size: 0.68rem; }
+    .stock-eval { font-size: 0.62rem; margin-top: 8px; }
+    .stock-badge { font-size: 0.58rem; padding: 1px 6px; }
+}
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -45,6 +68,41 @@ def fmt(value, decimals=2):
 
 def is_kr(ticker: str) -> bool:
     return ticker.upper().endswith((".KS", ".KQ"))
+
+
+def render_detail(h):
+    quote = quotes[h["id"]]
+    with st.container(border=True):
+        st.markdown(f"#### {h['name']} ({h['ticker']})")
+
+        period_label = st.radio(
+            "기간", list(stocks.PERIOD_OPTIONS.keys()),
+            horizontal=True, key=f"period_{h['id']}",
+        )
+        opt = stocks.PERIOD_OPTIONS[period_label]
+        with st.spinner("차트 불러오는 중..."):
+            series = stocks.get_history(h["ticker"], opt["period"], opt["interval"])
+        if series is not None and not series.empty:
+            st.line_chart(series, height=280)
+        else:
+            st.caption("차트 데이터를 불러오지 못했습니다.")
+
+        st.markdown("**관련 뉴스**")
+        if is_kr(h["ticker"]):
+            code = h["ticker"].split(".")[0]
+            st.markdown(f"📰 [네이버에서 {h['name']} 뉴스 보기](https://finance.naver.com/item/news.naver?code={code})")
+        else:
+            news = stocks.get_news(h["ticker"])
+            if news:
+                for n in news:
+                    line = f"- [{n['title']}]({n['link']})" if n["link"] else f"- {n['title']}"
+                    if n["publisher"]:
+                        line += f" — {n['publisher']}"
+                    st.markdown(line)
+            else:
+                st.caption("관련 뉴스가 없습니다.")
+
+        _ = quote  # noqa (kept for future use, e.g. showing current price in detail header)
 
 
 user = current_user()
@@ -101,12 +159,16 @@ if not holdings:
     st.stop()
 
 quotes = {h["id"]: stocks.get_quote(h["ticker"]) for h in holdings}
+fx_rates = stocks.get_fx_rates()
 
-ctrl_cols = st.columns([1, 1, 3])
+ctrl_cols = st.columns([1, 1, 1, 2])
 with ctrl_cols[0]:
     market_filter = st.selectbox("시장", ["전체", "국장", "해외"], key="market_filter")
 with ctrl_cols[1]:
     sort_key = st.selectbox("정렬", ["시장순", "이름순", "평가금액순", "등락률순"], key="sort_key")
+with ctrl_cols[2]:
+    display_currency_label = st.selectbox("통화", list(CURRENCY_LABELS.values()), key="display_currency")
+display_currency = next(k for k, v in CURRENCY_LABELS.items() if v == display_currency_label)
 
 filtered = holdings
 if market_filter == "국장":
@@ -130,138 +192,108 @@ def sort_value(h):
 filtered = sorted(filtered, key=sort_value)
 
 N_COLS = 3
-for row_start in range(0, len(filtered), N_COLS):
-    row_items = filtered[row_start:row_start + N_COLS]
-    cols = st.columns(N_COLS)
-    for col, h in zip(cols, row_items):
-        quote = quotes[h["id"]]
-        price = quote["price"]
-        currency = quote["currency"] or ""
-        value = (price or 0) * h["quantity"]
+total_display_value = 0.0
+total_display_cost = 0.0
 
-        with col:
-            with st.container(border=True):
-                top = st.columns([5, 1])
-                ticker_upper = h["ticker"].upper()
-                if is_kr(h["ticker"]):
-                    badge = "국장"
-                elif ticker_upper.endswith(".T"):
-                    badge = "일본"
-                else:
-                    badge = "해외"
-                top[0].markdown(
-                    f"<span class='stock-badge'>{badge}</span><br>"
-                    f"<span class='stock-name'>{h['name']}</span><br>"
-                    f"<span class='stock-ticker'>{h['ticker']}</span>",
-                    unsafe_allow_html=True,
-                )
-                if top[1].button("🗑", key=f"del_{h['id']}", help="삭제"):
-                    portfolio.delete_holding(h["id"])
-                    st.rerun()
+with st.container(key="stock_grid"):
+    for row_start in range(0, len(filtered), N_COLS):
+        row_items = filtered[row_start:row_start + N_COLS]
+        cols = st.columns(N_COLS)
+        for col, h in zip(cols, row_items):
+            quote = quotes[h["id"]]
+            price = quote["price"]
+            currency = quote["currency"] or ""
+            value = (price or 0) * h["quantity"]
 
-                if price is not None:
-                    change = quote["change"] or 0
-                    change_pct = quote["change_pct"] or 0
-                    sign = "+" if change > 0 else ""
-                    color = change_color(change)
-                    st.markdown(
-                        f"<div class='stock-price'>{fmt(price)} "
-                        f"<span class='stock-currency'>{currency}</span></div>"
-                        f"<div class='stock-change' style='color:{color}'>"
-                        f"{sign}{fmt(change)} ({sign}{fmt(change_pct)}%)</div>",
+            disp_price = stocks.convert(price, currency, display_currency, fx_rates)
+            disp_change = stocks.convert(quote["change"], currency, display_currency, fx_rates)
+            disp_value = stocks.convert(value, currency, display_currency, fx_rates)
+            if disp_value is not None:
+                total_display_value += disp_value
+
+            with col:
+                with st.container(border=True):
+                    top = st.columns([5, 1])
+                    ticker_upper = h["ticker"].upper()
+                    if is_kr(h["ticker"]):
+                        badge = "국장"
+                    elif ticker_upper.endswith(".T"):
+                        badge = "일본"
+                    else:
+                        badge = "해외"
+                    top[0].markdown(
+                        f"<span class='stock-badge'>{badge}</span><br>"
+                        f"<span class='stock-name'>{h['name']}</span><br>"
+                        f"<span class='stock-ticker'>{h['ticker']}</span>",
                         unsafe_allow_html=True,
                     )
-                else:
-                    st.markdown("<div class='stock-error'>가격 조회 실패</div>", unsafe_allow_html=True)
+                    if top[1].button("🗑", key=f"del_{h['id']}", help="삭제"):
+                        portfolio.delete_holding(h["id"])
+                        st.rerun()
 
-                eval_html = f"평가금액 <b>{fmt(value, 0)} {currency}</b>"
-                if h["avg_price"]:
-                    cost = h["avg_price"] * h["quantity"]
-                    pl = value - cost
-                    pl_pct = (pl / cost * 100) if cost else 0
-                    pl_color = change_color(pl)
-                    sign = "+" if pl > 0 else ""
-                    eval_html += (
-                        f"<br>평가손익 <b style='color:{pl_color}'>"
-                        f"{sign}{fmt(pl, 0)} ({sign}{fmt(pl_pct)}%)</b>"
-                    )
-                eval_html += f"<br>수량 {fmt(h['quantity'])}"
-                st.markdown(f"<div class='stock-eval'>{eval_html}</div>", unsafe_allow_html=True)
+                    if disp_price is not None:
+                        change = disp_change or 0
+                        change_pct = quote["change_pct"] or 0
+                        sign = "+" if change > 0 else ""
+                        color = change_color(change)
+                        st.markdown(
+                            f"<div class='stock-price'>{fmt(disp_price)} "
+                            f"<span class='stock-currency'>{CURRENCY_SUFFIX[display_currency]}</span></div>"
+                            f"<div class='stock-change' style='color:{color}'>"
+                            f"{sign}{fmt(change)} ({sign}{fmt(change_pct)}%)</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown("<div class='stock-error'>가격 조회 실패</div>", unsafe_allow_html=True)
 
-                st.write("")
-                expand_key = f"expand_{h['id']}"
-                is_expanded = st.session_state.get(expand_key, False)
-                label = "닫기 ▲" if is_expanded else "상세보기 (차트·뉴스) ▾"
-                if st.button(label, key=f"toggle_{h['id']}", use_container_width=True):
-                    st.session_state[expand_key] = not is_expanded
-                    st.rerun()
+                    eval_html = f"평가금액 <b>{fmt(disp_value or 0, 0)} {CURRENCY_SUFFIX[display_currency]}</b>"
+                    if h["avg_price"] and disp_price is not None:
+                        cost = h["avg_price"] * h["quantity"]
+                        disp_cost = stocks.convert(cost, currency, display_currency, fx_rates) or 0
+                        total_display_cost += disp_cost
+                        pl = (disp_value or 0) - disp_cost
+                        pl_pct = (pl / disp_cost * 100) if disp_cost else 0
+                        pl_color = change_color(pl)
+                        sign = "+" if pl > 0 else ""
+                        eval_html += (
+                            f"<br>평가손익 <b style='color:{pl_color}'>"
+                            f"{sign}{fmt(pl, 0)} ({sign}{fmt(pl_pct)}%)</b>"
+                        )
+                    eval_html += f"<br>수량 {fmt(h['quantity'])}"
+                    st.markdown(f"<div class='stock-eval'>{eval_html}</div>", unsafe_allow_html=True)
 
-for h in filtered:
-    if not st.session_state.get(f"expand_{h['id']}"):
-        continue
-    quote = quotes[h["id"]]
-    with st.container(border=True):
-        st.markdown(f"#### {h['name']} ({h['ticker']})")
+                    st.write("")
+                    is_expanded = st.session_state.get("expanded_id") == h["id"]
+                    label = "닫기 ▲" if is_expanded else "상세보기 ▾"
+                    if st.button(label, key=f"toggle_{h['id']}", use_container_width=True):
+                        st.session_state["expanded_id"] = None if is_expanded else h["id"]
+                        st.rerun()
 
-        period_label = st.radio(
-            "기간", list(stocks.PERIOD_OPTIONS.keys()),
-            horizontal=True, key=f"period_{h['id']}",
+        expanded_in_row = next(
+            (h for h in row_items if st.session_state.get("expanded_id") == h["id"]), None
         )
-        opt = stocks.PERIOD_OPTIONS[period_label]
-        with st.spinner("차트 불러오는 중..."):
-            series = stocks.get_history(h["ticker"], opt["period"], opt["interval"])
-        if series is not None and not series.empty:
-            st.line_chart(series, height=280)
-        else:
-            st.caption("차트 데이터를 불러오지 못했습니다.")
-
-        st.markdown("**관련 뉴스**")
-        if is_kr(h["ticker"]):
-            code = h["ticker"].split(".")[0]
-            st.markdown(f"📰 [네이버에서 {h['name']} 뉴스 보기](https://finance.naver.com/item/news.naver?code={code})")
-        else:
-            news = stocks.get_news(h["ticker"])
-            if news:
-                for n in news:
-                    line = f"- [{n['title']}]({n['link']})" if n["link"] else f"- {n['title']}"
-                    if n["publisher"]:
-                        line += f" — {n['publisher']}"
-                    st.markdown(line)
-            else:
-                st.caption("관련 뉴스가 없습니다.")
+        if expanded_in_row:
+            render_detail(expanded_in_row)
 
 st.divider()
 st.subheader("포트폴리오 요약")
-totals = {}
-for h in filtered:
-    q = quotes[h["id"]]
-    currency = q["currency"] or "?"
-    value = (q["price"] or 0) * h["quantity"]
-    cost = (h["avg_price"] or 0) * h["quantity"]
-    t = totals.setdefault(currency, {"value": 0.0, "cost": 0.0})
-    t["value"] += value
-    t["cost"] += cost
-
-summary_cols = st.columns(len(totals) * 2 if totals else 1)
-i = 0
-for currency, t in totals.items():
-    with summary_cols[i]:
+summary_cols = st.columns(2)
+with summary_cols[0]:
+    st.markdown(
+        f"<div class='portfolio-total-label'>총 평가금액 ({display_currency_label})</div>"
+        f"<div class='portfolio-total-value'>{fmt(total_display_value, 0)} {CURRENCY_SUFFIX[display_currency]}</div>",
+        unsafe_allow_html=True,
+    )
+if total_display_cost:
+    pl = total_display_value - total_display_cost
+    pl_pct = pl / total_display_cost * 100
+    color = change_color(pl)
+    sign = "+" if pl > 0 else ""
+    with summary_cols[1]:
         st.markdown(
-            f"<div class='portfolio-total-label'>{currency} 총 평가금액</div>"
-            f"<div class='portfolio-total-value'>{fmt(t['value'], 0)}</div>",
+            f"<div class='portfolio-total-label'>총 손익 ({display_currency_label})</div>"
+            f"<div class='portfolio-total-value' style='color:{color}'>"
+            f"{sign}{fmt(pl, 0)} ({sign}{fmt(pl_pct)}%)</div>",
             unsafe_allow_html=True,
         )
-    i += 1
-    if t["cost"]:
-        pl = t["value"] - t["cost"]
-        pl_pct = pl / t["cost"] * 100
-        color = change_color(pl)
-        sign = "+" if pl > 0 else ""
-        with summary_cols[i]:
-            st.markdown(
-                f"<div class='portfolio-total-label'>{currency} 총 손익</div>"
-                f"<div class='portfolio-total-value' style='color:{color}'>"
-                f"{sign}{fmt(pl, 0)} ({sign}{fmt(pl_pct)}%)</div>",
-                unsafe_allow_html=True,
-            )
-    i += 1
+st.caption("매입단가를 입력하지 않은 종목은 손익 계산에서 제외됩니다. 환율은 1시간 캐시됩니다.")

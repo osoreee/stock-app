@@ -104,6 +104,35 @@ def get_quote(symbol: str):
     }
 
 
+_FX_TICKERS = {"KRW": "KRW=X", "JPY": "JPY=X"}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_fx_rates():
+    """Units of each currency per 1 USD, e.g. {"USD": 1.0, "KRW": 1350.0, "JPY": 150.0}."""
+    rates = {"USD": 1.0}
+    for currency, ticker in _FX_TICKERS.items():
+        try:
+            info = yf.Ticker(ticker).get_info()
+            rate = info.get("regularMarketPrice") or info.get("currentPrice")
+            if rate:
+                rates[currency] = rate
+        except Exception:
+            pass
+    return rates
+
+
+def convert(amount, from_currency, to_currency, rates):
+    if amount is None:
+        return None
+    if from_currency == to_currency:
+        return amount
+    if from_currency not in rates or to_currency not in rates:
+        return None
+    usd = amount / rates[from_currency]
+    return usd * rates[to_currency]
+
+
 PERIOD_OPTIONS = {
     "오늘": {"period": "1d", "interval": "5m"},
     "1주일": {"period": "5d", "interval": "30m"},
