@@ -109,9 +109,17 @@ def search_symbols(query: str, max_results: int = 8):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_quote(symbol: str):
-    fi = yf.Ticker(symbol).fast_info
-    price = fi.get("last_price")
-    prev_close = fi.get("previous_close")
+    try:
+        info = yf.Ticker(symbol).get_info()
+    except Exception as e:
+        return {
+            "price": None, "prev_close": None, "change": None,
+            "change_pct": None, "currency": None, "error": repr(e),
+        }
+
+    price = info.get("currentPrice") or info.get("regularMarketPrice")
+    prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
+    currency = info.get("currency")
     change = None
     change_pct = None
     if price is not None and prev_close:
@@ -122,7 +130,8 @@ def get_quote(symbol: str):
         "prev_close": prev_close,
         "change": change,
         "change_pct": change_pct,
-        "currency": fi.get("currency"),
+        "currency": currency,
+        "error": None if price is not None else f"no price field (keys sample: {list(info.keys())[:15]})",
     }
 
 

@@ -87,6 +87,8 @@ else:
             cols[1].metric("현재가", f"{price:,.2f} {currency}", delta)
         else:
             cols[1].write("가격 조회 실패")
+            if quote.get("error"):
+                cols[1].caption(quote["error"])
 
         cols[2].write(f"수량: {h['quantity']:,.2f}")
         cols[3].write(f"평가금액: {value:,.0f} {currency}")
