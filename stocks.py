@@ -49,10 +49,12 @@ def search_symbols(query: str, max_results: int = 8):
             candidates.append(f"{m['code']}.KQ")
 
     if not results and not candidates:
-        # Last resort: treat the query as a raw ticker (also try KRX suffixes for 6-digit codes)
+        # Last resort: treat the query as a raw ticker (also try KRX/Japan suffixes for numeric codes)
         candidates = [query.upper()]
         if query.isdigit() and len(query) == 6:
             candidates = [f"{query}.KS", f"{query}.KQ"]
+        elif query.isdigit() and len(query) == 4:
+            candidates = [f"{query}.T"]
 
     for sym in candidates:
         if len(results) >= max_results:
@@ -100,6 +102,27 @@ def get_quote(symbol: str):
         "currency": currency,
         "error": None if price is not None else f"no price field (keys sample: {list(info.keys())[:15]})",
     }
+
+
+PERIOD_OPTIONS = {
+    "오늘": {"period": "1d", "interval": "5m"},
+    "1주일": {"period": "5d", "interval": "30m"},
+    "1개월": {"period": "1mo", "interval": "1d"},
+    "1년": {"period": "1y", "interval": "1d"},
+    "올해": {"period": "ytd", "interval": "1d"},
+    "전체기간": {"period": "max", "interval": "1mo"},
+}
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_history(symbol: str, period: str, interval: str):
+    try:
+        hist = yf.Ticker(symbol).history(period=period, interval=interval)
+    except Exception:
+        return None
+    if hist is None or hist.empty:
+        return None
+    return hist["Close"]
 
 
 @st.cache_data(ttl=300, show_spinner=False)
