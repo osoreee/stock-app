@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
@@ -39,23 +41,25 @@ CUSTOM_CSS = """
 .portfolio-total-label { font-size: 0.85rem; color: #868e96; }
 .portfolio-total-value { font-size: 1.4rem; font-weight: 800; }
 
-.st-key-ctrl_row div[data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
+.st-key-ctrl_row > div > div[data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
 
 /* 스마트폰: 3열 카드 그리드와 상단 컨트롤을 한 줄로 유지 (가로 스크롤 없이) */
 @media (max-width: 640px) {
-    .st-key-stock_grid div[data-testid="stHorizontalBlock"] {
+    /* 바깥쪽(3장 카드) 행에만 적용 — 카드 안쪽 [이름/삭제] 같은 중첩 컬럼은 건드리지 않음 */
+    .st-key-stock_grid > div > div[data-testid="stHorizontalBlock"] {
         flex-wrap: nowrap !important;
-        gap: 0.35rem !important;
+        gap: 0.3rem !important;
     }
-    .st-key-stock_grid div[data-testid="column"] {
+    .st-key-stock_grid > div > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
         width: 33.33% !important;
         min-width: 33.33% !important;
+        max-width: 33.33% !important;
         flex: 1 1 0 !important;
     }
-    .st-key-stock_grid [data-testid="stVerticalBlockBorderWrapper"] { padding: 0.45rem !important; }
+    .st-key-stock_grid [data-testid="stVerticalBlockBorderWrapper"] { padding: 0.4rem !important; }
 
-    .st-key-ctrl_row div[data-testid="stHorizontalBlock"] { gap: 0.3rem !important; }
-    .st-key-ctrl_row div[data-testid="column"] { min-width: 0 !important; }
+    .st-key-ctrl_row > div > div[data-testid="stHorizontalBlock"] { gap: 0.25rem !important; }
+    .st-key-ctrl_row div[data-testid="stColumn"] { min-width: 0 !important; width: 33.33% !important; }
     .st-key-ctrl_row label p { font-size: 0.68rem !important; }
     .st-key-ctrl_row [data-baseweb="select"] * { font-size: 0.72rem !important; }
 
@@ -87,8 +91,9 @@ def is_kr(ticker: str) -> bool:
 
 
 def render_detail(h):
+    name = stocks.display_name(h["ticker"], h["name"])
     with st.container(border=True):
-        st.markdown(f"#### {h['name']} ({h['ticker']})")
+        st.markdown(f"#### {name} ({h['ticker']})")
 
         period_label = st.radio(
             "기간", list(stocks.PERIOD_OPTIONS.keys()),
@@ -105,7 +110,7 @@ def render_detail(h):
         st.markdown("**관련 뉴스**")
         if is_kr(h["ticker"]):
             code = h["ticker"].split(".")[0]
-            st.markdown(f"📰 [네이버에서 {h['name']} 뉴스 보기](https://finance.naver.com/item/news.naver?code={code})")
+            st.markdown(f"📰 [네이버에서 {name} 뉴스 보기](https://finance.naver.com/item/news.naver?code={code})")
         else:
             news = stocks.get_news(h["ticker"])
             if news:
@@ -117,7 +122,10 @@ def render_detail(h):
             else:
                 st.caption("관련 뉴스가 없습니다.")
 
-        st.markdown("**보유 정보 수정**")
+
+def render_edit_form(h):
+    with st.container(border=True):
+        st.markdown(f"**✏️ {stocks.display_name(h['ticker'], h['name'])} 보유 정보 수정**")
         edit_cols = st.columns([1, 1, 1])
         with edit_cols[0]:
             new_qty = st.number_input(
@@ -133,6 +141,7 @@ def render_detail(h):
             st.write("")
             if st.button("저장", key=f"save_{h['id']}", use_container_width=True):
                 portfolio.update_holding(h["id"], new_qty, new_avg)
+                st.session_state["editing_id"] = None
                 st.success("수정됐습니다.")
                 st.rerun()
 
@@ -152,7 +161,8 @@ if st.sidebar.button("로그아웃", use_container_width=True):
 st.markdown(
     "<div class='app-header'><span class='app-header-icon'>💹</span>"
     "<span class='app-header-title'>내 주식 포트폴리오</span></div>"
-    "<div class='app-subtitle'>실시간 시세 · 손익 · 관련 뉴스를 한눈에</div>",
+    f"<div class='app-subtitle'>실시간 시세 · 손익 · 관련 뉴스를 한눈에 · "
+    f"마지막 갱신 {datetime.now().strftime('%H:%M:%S')} (1분마다 자동)</div>",
     unsafe_allow_html=True,
 )
 
@@ -249,7 +259,7 @@ with st.container(key="stock_grid"):
 
             with col:
                 with st.container(border=True):
-                    top = st.columns([5, 1])
+                    top = st.columns([4, 1, 1])
                     ticker_upper = h["ticker"].upper()
                     if is_kr(h["ticker"]):
                         badge = "국장"
@@ -257,13 +267,18 @@ with st.container(key="stock_grid"):
                         badge = "일본"
                     else:
                         badge = "해외"
+                    display_name = stocks.display_name(h["ticker"], h["name"])
                     top[0].markdown(
                         f"<span class='stock-badge'>{badge}</span><br>"
-                        f"<span class='stock-name'>{h['name']}</span><br>"
+                        f"<span class='stock-name'>{display_name}</span><br>"
                         f"<span class='stock-ticker'>{h['ticker']}</span>",
                         unsafe_allow_html=True,
                     )
-                    if top[1].button("🗑", key=f"del_{h['id']}", help="삭제"):
+                    if top[1].button("✏️", key=f"edit_{h['id']}", help="수정"):
+                        cur = st.session_state.get("editing_id")
+                        st.session_state["editing_id"] = None if cur == h["id"] else h["id"]
+                        st.rerun()
+                    if top[2].button("🗑", key=f"del_{h['id']}", help="삭제"):
                         portfolio.delete_holding(h["id"])
                         st.rerun()
 
@@ -304,6 +319,12 @@ with st.container(key="stock_grid"):
                     if st.button(label, key=f"toggle_{h['id']}", use_container_width=True):
                         st.session_state["expanded_id"] = None if is_expanded else h["id"]
                         st.rerun()
+
+        editing_in_row = next(
+            (h for h in row_items if st.session_state.get("editing_id") == h["id"]), None
+        )
+        if editing_in_row:
+            render_edit_form(editing_in_row)
 
         expanded_in_row = next(
             (h for h in row_items if st.session_state.get("expanded_id") == h["id"]), None

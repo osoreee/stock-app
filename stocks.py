@@ -1,9 +1,20 @@
 import streamlit as st
 import yfinance as yf
 
-from krx_list import KRX_STOCKS
-from jp_list import JP_STOCKS
+from krx_list import KRX_STOCKS, KRX_NAME_BY_CODE
+from jp_list import JP_STOCKS, JP_NAME_BY_CODE
 from us_list import US_STOCKS
+
+
+def display_name(ticker: str, fallback: str) -> str:
+    """Prefer our curated Korean name for KR/JP tickers, even for holdings
+    added before this list existed or under an old company name."""
+    t = ticker.upper()
+    if t.endswith((".KS", ".KQ")):
+        return KRX_NAME_BY_CODE.get(ticker.split(".")[0], fallback)
+    if t.endswith(".T"):
+        return JP_NAME_BY_CODE.get(ticker.split(".")[0], fallback)
+    return fallback
 
 
 def _name_matches(query: str, stock_list, code_field_is_ticker=False):
