@@ -26,9 +26,16 @@ with st.expander("➕ 종목 추가"):
     query = st.text_input("종목명 또는 티커 (예: 삼성전자, AAPL, QQQ, 005930)", key="search_query")
     if st.button("검색", key="search_btn") and query:
         with st.spinner("검색 중..."):
-            st.session_state["search_results"] = stocks.search_symbols(query)
+            results, debug = stocks.search_symbols(query)
+            st.session_state["search_results"] = results
+            st.session_state["search_debug"] = debug
 
     results = st.session_state.get("search_results", [])
+    if not results and st.session_state.get("search_debug"):
+        with st.expander("🔧 디버그 정보 (임시)"):
+            for line in st.session_state["search_debug"]:
+                st.code(line)
+
     if results:
         options = {f"{r['symbol']} — {r['name']} ({r['exchange']})": r for r in results}
         choice = st.selectbox("검색 결과에서 선택", list(options.keys()), key="search_choice")

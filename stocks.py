@@ -5,11 +5,13 @@ import yfinance as yf
 def search_symbols(query: str, max_results: int = 8):
     query = query.strip()
     if not query:
-        return []
+        return [], []
 
     results = []
+    debug = []
     try:
         found = yf.Search(query, max_results=max_results, news_count=0, raise_errors=True).quotes
+        debug.append(f"yf.Search raw quotes: {found!r}")
         for q in found:
             symbol = q.get("symbol")
             if not symbol:
@@ -20,8 +22,8 @@ def search_symbols(query: str, max_results: int = 8):
                 "exchange": q.get("exchange", ""),
                 "type": q.get("quoteType", ""),
             })
-    except Exception:
-        pass
+    except Exception as e:
+        debug.append(f"yf.Search error: {e!r}")
 
     if not results:
         # Fallback: treat the query as a raw ticker (also try KRX suffixes for 6-digit codes)
@@ -32,6 +34,7 @@ def search_symbols(query: str, max_results: int = 8):
             try:
                 info = yf.Ticker(sym).get_info()
                 name = info.get("shortName") or info.get("longName")
+                debug.append(f"{sym}: info keys={list(info.keys())[:10]}, name={name!r}")
                 if name:
                     results.append({
                         "symbol": sym,
@@ -39,10 +42,10 @@ def search_symbols(query: str, max_results: int = 8):
                         "exchange": info.get("exchange", ""),
                         "type": info.get("quoteType", ""),
                     })
-            except Exception:
-                continue
+            except Exception as e:
+                debug.append(f"{sym}: error {e!r}")
 
-    return results
+    return results, debug
 
 
 @st.cache_data(ttl=60, show_spinner=False)
