@@ -1,48 +1,18 @@
 import streamlit as st
 import yfinance as yf
-import requests
 
-
-def _extract_krx_candidates(obj):
-    """Recursively scan a JSON structure for [6-digit code, name, ...] patterns,
-    since Naver's autocomplete response shape isn't officially documented."""
-    found = []
-    if isinstance(obj, list):
-        if len(obj) >= 2 and isinstance(obj[0], str) and obj[0].isdigit() and len(obj[0]) == 6:
-            name = obj[1] if isinstance(obj[1], str) else obj[0]
-            found.append((obj[0], name))
-        else:
-            for item in obj:
-                found.extend(_extract_krx_candidates(item))
-    elif isinstance(obj, dict):
-        for v in obj.values():
-            found.extend(_extract_krx_candidates(v))
-    return found
+from krx_list import KRX_STOCKS
 
 
 def search_krx_by_name(query: str, limit: int = 5):
-    """Korean company name -> KRX code, via Naver Finance's autocomplete API.
-    Yahoo Finance's search doesn't index Korean-language company names."""
-    resp = requests.get(
-        "https://ac.finance.naver.com/ac",
-        params={
-            "q": query, "q_enc": "UTF-8", "st": 111, "frm": "stock",
-            "r_format": "json", "r_enc": "UTF-8", "r_unicode": 0,
-            "t_koreng": 1, "run": 2, "rev": 4,
-        },
-        headers={"User-Agent": "Mozilla/5.0"},
-        timeout=10,
-    )
-    data = resp.json()
-    seen = set()
+    """Korean company name -> KRX code, matched against a bundled static list.
+    (Yahoo's search doesn't index Korean text, and Naver's API blocks cloud IPs.)"""
     matches = []
-    for code, name in _extract_krx_candidates(data):
-        if code in seen:
-            continue
-        seen.add(code)
-        matches.append({"code": code, "name": name})
-        if len(matches) >= limit:
-            break
+    for code, name in KRX_STOCKS:
+        if query in name or query == code:
+            matches.append({"code": code, "name": name})
+            if len(matches) >= limit:
+                break
     return matches
 
 
@@ -72,14 +42,11 @@ def search_symbols(query: str, max_results: int = 8):
 
     candidates = []
     if not results:
-        try:
-            krx_matches = search_krx_by_name(query, limit=max_results)
-            debug.append(f"Naver KRX matches: {krx_matches!r}")
-            for m in krx_matches:
-                candidates.append(f"{m['code']}.KS")
-                candidates.append(f"{m['code']}.KQ")
-        except Exception as e:
-            debug.append(f"Naver search error: {e!r}")
+        krx_matches = search_krx_by_name(query, limit=max_results)
+        debug.append(f"KRX list matches: {krx_matches!r}")
+        for m in krx_matches:
+            candidates.append(f"{m['code']}.KS")
+            candidates.append(f"{m['code']}.KQ")
 
     if not results and not candidates:
         # Last resort: treat the query as a raw ticker (also try KRX suffixes for 6-digit codes)
