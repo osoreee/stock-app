@@ -2,18 +2,36 @@ import streamlit as st
 import yfinance as yf
 
 from krx_list import KRX_STOCKS
+from jp_list import JP_STOCKS
+from us_list import US_STOCKS
 
 
-def search_krx_by_name(query: str, limit: int = 5):
-    """Korean company name -> KRX code, matched against a bundled static list.
-    (Yahoo's search doesn't index Korean text, and Naver's API blocks cloud IPs.)"""
+def _name_matches(query: str, stock_list, code_field_is_ticker=False):
     matches = []
-    for code, name in KRX_STOCKS:
+    for code, name in stock_list:
         if query in name or query == code:
-            matches.append({"code": code, "name": name})
-            if len(matches) >= limit:
-                break
+            matches.append((code, name))
     return matches
+
+
+def _try_candidates(candidates, max_results, results, debug):
+    """candidates: list of (symbol, preferred_name_or_None). Appends to results in place."""
+    for sym, preferred_name in candidates:
+        if len(results) >= max_results:
+            break
+        try:
+            info = yf.Ticker(sym).get_info()
+            resolved_name = info.get("shortName") or info.get("longName")
+            debug.append(f"{sym}: resolved={resolved_name!r}")
+            if resolved_name:
+                results.append({
+                    "symbol": sym,
+                    "name": preferred_name or resolved_name,
+                    "exchange": info.get("exchange", ""),
+                    "type": info.get("quoteType", ""),
+                })
+        except Exception as e:
+            debug.append(f"{sym}: error {e!r}")
 
 
 def search_symbols(query: str, max_results: int = 8):
@@ -40,38 +58,28 @@ def search_symbols(query: str, max_results: int = 8):
     except Exception as e:
         debug.append(f"yf.Search error: {e!r}")
 
-    candidates = []
+    # Yahoo's search doesn't index Korean-language names (company or common names),
+    # so try our own curated code/ticker lists next.
     if not results:
-        krx_matches = search_krx_by_name(query, limit=max_results)
-        debug.append(f"KRX list matches: {krx_matches!r}")
-        for m in krx_matches:
-            candidates.append(f"{m['code']}.KS")
-            candidates.append(f"{m['code']}.KQ")
+        candidates = []
+        for code, name in _name_matches(query, KRX_STOCKS):
+            candidates.append((f"{code}.KS", name))
+            candidates.append((f"{code}.KQ", name))
+        for code, name in _name_matches(query, JP_STOCKS):
+            candidates.append((f"{code}.T", name))
+        for ticker, name in _name_matches(query, US_STOCKS):
+            candidates.append((ticker, None))  # keep Yahoo's own English name
+        debug.append(f"curated-list candidates: {candidates!r}")
+        _try_candidates(candidates[: max_results * 3], max_results, results, debug)
 
-    if not results and not candidates:
+    if not results:
         # Last resort: treat the query as a raw ticker (also try KRX/Japan suffixes for numeric codes)
-        candidates = [query.upper()]
+        candidates = [(query.upper(), None)]
         if query.isdigit() and len(query) == 6:
-            candidates = [f"{query}.KS", f"{query}.KQ"]
+            candidates = [(f"{query}.KS", None), (f"{query}.KQ", None)]
         elif query.isdigit() and len(query) == 4:
-            candidates = [f"{query}.T"]
-
-    for sym in candidates:
-        if len(results) >= max_results:
-            break
-        try:
-            info = yf.Ticker(sym).get_info()
-            name = info.get("shortName") or info.get("longName")
-            debug.append(f"{sym}: name={name!r}")
-            if name:
-                results.append({
-                    "symbol": sym,
-                    "name": name,
-                    "exchange": info.get("exchange", ""),
-                    "type": info.get("quoteType", ""),
-                })
-        except Exception as e:
-            debug.append(f"{sym}: error {e!r}")
+            candidates = [(f"{query}.T", None)]
+        _try_candidates(candidates, max_results, results, debug)
 
     return results, debug
 

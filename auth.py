@@ -47,7 +47,13 @@ def login(username: str, password: str):
 
 
 def login_signup_ui():
-    st.title("📈 내 주식 포트폴리오")
+    st.markdown(
+        "<div style='display:flex;align-items:center;gap:12px;margin-bottom:1.2rem;'>"
+        "<span style='font-size:2.1rem;'>💹</span>"
+        "<span style='font-size:1.9rem;font-weight:800;letter-spacing:-0.02em;'>내 주식 포트폴리오</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
     tab_login, tab_signup = st.tabs(["로그인", "회원가입"])
 
     with tab_login:

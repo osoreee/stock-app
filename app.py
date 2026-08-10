@@ -1,10 +1,11 @@
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 from auth import current_user, logout, login_signup_ui
 import portfolio
 import stocks
 
-st.set_page_config(page_title="내 주식 포트폴리오", page_icon="📈", layout="wide")
+st.set_page_config(page_title="내 주식 포트폴리오", page_icon="💹", layout="wide")
 
 UP_COLOR = "#e03131"
 DOWN_COLOR = "#1971c2"
@@ -16,40 +17,55 @@ CURRENCY_SUFFIX = {"KRW": "원", "USD": "$", "JPY": "¥"}
 CUSTOM_CSS = """
 <style>
 .block-container { padding-top: 2rem; max-width: 1200px; }
+
+.app-header { display:flex; align-items:center; gap:12px; margin-bottom: 2px; }
+.app-header-icon { font-size: 2.1rem; }
+.app-header-title { font-size: 1.9rem; font-weight: 800; letter-spacing: -0.02em; }
+.app-subtitle { color:#868e96; font-size:0.85rem; margin-bottom:1.4rem; letter-spacing: 0.01em; }
+
 .stock-badge {
     display: inline-block; padding: 2px 9px; border-radius: 999px;
-    font-size: 0.7rem; font-weight: 700; background: #eef1f5; color: #495057;
+    font-size: 0.77rem; font-weight: 700; background: #eef1f5; color: #495057;
     letter-spacing: 0.02em;
 }
-.stock-name { font-size: 1.05rem; font-weight: 700; color: inherit; }
-.stock-ticker { font-size: 0.78rem; color: #868e96; }
-.stock-price { font-size: 1.55rem; font-weight: 800; margin-top: 10px; line-height: 1.2; }
-.stock-currency { font-size: 0.85rem; font-weight: 500; color: #868e96; }
-.stock-change { font-size: 0.95rem; font-weight: 700; margin-top: 2px; }
+.stock-name { font-size: 1.37rem; font-weight: 700; color: inherit; }
+.stock-ticker { font-size: 0.86rem; color: #868e96; }
+.stock-price { font-size: 1.7rem; font-weight: 800; margin-top: 10px; line-height: 1.2; }
+.stock-currency { font-size: 0.94rem; font-weight: 500; color: #868e96; }
+.stock-change { font-size: 1.05rem; font-weight: 700; margin-top: 2px; }
 .stock-error { font-size: 0.95rem; color: #868e96; margin-top: 10px; }
-.stock-eval { font-size: 0.83rem; color: #495057; margin-top: 12px; line-height: 1.6; }
+.stock-eval { font-size: 0.91rem; color: #495057; margin-top: 12px; line-height: 1.6; }
 .stock-eval b { font-weight: 700; }
 .portfolio-total-label { font-size: 0.85rem; color: #868e96; }
 .portfolio-total-value { font-size: 1.4rem; font-weight: 800; }
 
-/* 스마트폰에서도 한 줄에 3개씩 유지 */
+.st-key-ctrl_row div[data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; }
+
+/* 스마트폰: 3열 카드 그리드와 상단 컨트롤을 한 줄로 유지 (가로 스크롤 없이) */
 @media (max-width: 640px) {
     .st-key-stock_grid div[data-testid="stHorizontalBlock"] {
         flex-wrap: nowrap !important;
-        gap: 0.4rem !important;
+        gap: 0.35rem !important;
     }
     .st-key-stock_grid div[data-testid="column"] {
         width: 33.33% !important;
         min-width: 33.33% !important;
         flex: 1 1 0 !important;
     }
-    .stock-name { font-size: 0.8rem; }
-    .stock-ticker { font-size: 0.62rem; }
-    .stock-price { font-size: 0.95rem; margin-top: 6px; }
-    .stock-currency { font-size: 0.65rem; }
-    .stock-change { font-size: 0.68rem; }
-    .stock-eval { font-size: 0.62rem; margin-top: 8px; }
-    .stock-badge { font-size: 0.58rem; padding: 1px 6px; }
+    .st-key-stock_grid [data-testid="stVerticalBlockBorderWrapper"] { padding: 0.45rem !important; }
+
+    .st-key-ctrl_row div[data-testid="stHorizontalBlock"] { gap: 0.3rem !important; }
+    .st-key-ctrl_row div[data-testid="column"] { min-width: 0 !important; }
+    .st-key-ctrl_row label p { font-size: 0.68rem !important; }
+    .st-key-ctrl_row [data-baseweb="select"] * { font-size: 0.72rem !important; }
+
+    .stock-name { font-size: 1.04rem; }
+    .stock-ticker { font-size: 0.68rem; }
+    .stock-price { font-size: 1.05rem; margin-top: 6px; }
+    .stock-currency { font-size: 0.72rem; }
+    .stock-change { font-size: 0.75rem; }
+    .stock-eval { font-size: 0.68rem; margin-top: 8px; }
+    .stock-badge { font-size: 0.64rem; padding: 1px 6px; }
 }
 </style>
 """
@@ -71,7 +87,6 @@ def is_kr(ticker: str) -> bool:
 
 
 def render_detail(h):
-    quote = quotes[h["id"]]
     with st.container(border=True):
         st.markdown(f"#### {h['name']} ({h['ticker']})")
 
@@ -102,7 +117,24 @@ def render_detail(h):
             else:
                 st.caption("관련 뉴스가 없습니다.")
 
-        _ = quote  # noqa (kept for future use, e.g. showing current price in detail header)
+        st.markdown("**보유 정보 수정**")
+        edit_cols = st.columns([1, 1, 1])
+        with edit_cols[0]:
+            new_qty = st.number_input(
+                "수량", min_value=0.0, value=float(h["quantity"]), step=1.0, key=f"edit_qty_{h['id']}"
+            )
+        with edit_cols[1]:
+            new_avg = st.number_input(
+                "평균 매입단가", min_value=0.0, value=float(h["avg_price"] or 0), step=100.0,
+                key=f"edit_avg_{h['id']}",
+            )
+        with edit_cols[2]:
+            st.write("")
+            st.write("")
+            if st.button("저장", key=f"save_{h['id']}", use_container_width=True):
+                portfolio.update_holding(h["id"], new_qty, new_avg)
+                st.success("수정됐습니다.")
+                st.rerun()
 
 
 user = current_user()
@@ -110,19 +142,22 @@ if not user:
     login_signup_ui()
     st.stop()
 
+st_autorefresh(interval=60_000, key="auto_refresh")
+
 st.sidebar.markdown(f"### 👤 {user['username']}님")
 if st.sidebar.button("로그아웃", use_container_width=True):
     logout()
     st.rerun()
 
-header_cols = st.columns([5, 1])
-header_cols[0].title("📈 내 주식 포트폴리오")
-if header_cols[1].button("🔄 새로고침", use_container_width=True):
-    st.cache_data.clear()
-    st.rerun()
+st.markdown(
+    "<div class='app-header'><span class='app-header-icon'>💹</span>"
+    "<span class='app-header-title'>내 주식 포트폴리오</span></div>"
+    "<div class='app-subtitle'>실시간 시세 · 손익 · 관련 뉴스를 한눈에</div>",
+    unsafe_allow_html=True,
+)
 
 with st.expander("➕ 종목 추가"):
-    query = st.text_input("종목명 또는 티커 (예: 삼성전자, AAPL, QQQ, 005930)", key="search_query")
+    query = st.text_input("종목명 또는 티커 (예: 삼성전자, 애플, 도요타, AAPL, 005930)", key="search_query")
     if st.button("검색", key="search_btn") and query:
         with st.spinner("검색 중..."):
             results, _debug = stocks.search_symbols(query)
@@ -161,13 +196,14 @@ if not holdings:
 quotes = {h["id"]: stocks.get_quote(h["ticker"]) for h in holdings}
 fx_rates = stocks.get_fx_rates()
 
-ctrl_cols = st.columns([1, 1, 1, 2])
-with ctrl_cols[0]:
-    market_filter = st.selectbox("시장", ["전체", "국장", "해외"], key="market_filter")
-with ctrl_cols[1]:
-    sort_key = st.selectbox("정렬", ["시장순", "이름순", "평가금액순", "등락률순"], key="sort_key")
-with ctrl_cols[2]:
-    display_currency_label = st.selectbox("통화", list(CURRENCY_LABELS.values()), key="display_currency")
+with st.container(key="ctrl_row"):
+    ctrl_cols = st.columns(3)
+    with ctrl_cols[0]:
+        market_filter = st.selectbox("시장", ["전체", "국장", "해외"], key="market_filter")
+    with ctrl_cols[1]:
+        sort_key = st.selectbox("정렬", ["시장순", "이름순", "평가금액순", "등락률순"], key="sort_key")
+    with ctrl_cols[2]:
+        display_currency_label = st.selectbox("통화", list(CURRENCY_LABELS.values()), key="display_currency")
 display_currency = next(k for k, v in CURRENCY_LABELS.items() if v == display_currency_label)
 
 filtered = holdings
@@ -296,4 +332,4 @@ if total_display_cost:
             f"{sign}{fmt(pl, 0)} ({sign}{fmt(pl_pct)}%)</div>",
             unsafe_allow_html=True,
         )
-st.caption("매입단가를 입력하지 않은 종목은 손익 계산에서 제외됩니다. 환율은 1시간 캐시됩니다.")
+st.caption("매입단가를 입력하지 않은 종목은 손익 계산에서 제외됩니다. 시세는 1분마다 자동으로 갱신됩니다.")
